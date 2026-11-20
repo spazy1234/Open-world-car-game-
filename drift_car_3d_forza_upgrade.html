@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Drift Car 3D — Open Road</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#8ac9ef;font-family:system-ui,Arial;color:white}
+canvas{display:block}.hud{position:fixed;inset:12px 12px auto;display:flex;justify-content:space-between;pointer-events:none;gap:8px}
+.panel{background:#071522b9;border:1px solid #ffffff42;border-radius:13px;padding:8px 13px;backdrop-filter:blur(8px);min-width:100px}
+.label{font-size:10px;letter-spacing:1.5px;color:#b7d8e8}.value{font-size:23px;font-weight:900;font-variant-numeric:tabular-nums}
+.brand{position:fixed;top:15px;left:50%;transform:translateX(-50%);font-weight:1000;font-style:italic;font-size:clamp(16px,3vw,25px);text-shadow:0 2px 8px #123;white-space:nowrap;pointer-events:none}.cyan{color:#8cf3ff}
+.controls{position:fixed;bottom:18px;left:0;right:0;padding:0 18px;display:flex;justify-content:space-between;pointer-events:none}
+.group{display:flex;gap:10px;pointer-events:auto}.control{width:68px;height:66px;border-radius:17px;border:1px solid #ffffff66;background:#071522c9;color:white;font-size:25px;font-weight:900;touch-action:none;box-shadow:0 4px 12px #0005}.control:active{background:#0b9ebd}.drift{width:78px;font-size:12px;color:#8cf3ff}
+.overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:20px;background:#06152280}
+.card{width:min(410px,94vw);background:linear-gradient(145deg,#17364df2,#071522f5);border:1px solid #ffffff4a;border-radius:24px;padding:25px;text-align:center;box-shadow:0 20px 70px #0008}
+h1{font-size:34px;line-height:1;margin:0;font-style:italic}.card p{color:#c5dbe7;line-height:1.5}.start{width:100%;border:0;border-radius:13px;padding:14px;background:linear-gradient(90deg,#08a8c9,#6ae8ef);font-size:17px;font-weight:950;color:#06151d}
+.hint{font-size:12px;color:#a8c5d4!important}.msg{position:fixed;top:83px;left:50%;transform:translateX(-50%);background:#071522a8;padding:8px 13px;border-radius:10px;font-weight:800;pointer-events:none}
+@media(min-width:800px){.controls{padding:0 8vw}.control{width:76px;height:72px}}
+</style></head>
+<body>
+<div class="brand">DRIFT CAR <span class="cyan">3D</span> <span style="font-size:10px;color:#d9e9ef">OPEN ROAD</span></div>
+<div class="hud"><div class="panel"><div class="label">SPEED</div><div class="value cyan" id="speed">0 km/h</div></div><div class="panel" style="text-align:right"><div class="label">DISTANCE</div><div class="value" id="distance">0.0 km</div></div></div>
+<div class="msg" id="status">SUNNY • OPEN HIGHWAY</div>
+<div class="controls"><div class="group"><button class="control" id="left">◀</button><button class="control" id="right">▶</button></div><div class="group"><button class="control drift" id="drift">HANDBRAKE</button></div></div>
+<div class="overlay" id="intro"><div class="card"><h1>DRIFT CAR <span class="cyan">3D</span></h1><p>A more realistic open-road driving game. Explore a sunny mountain highway, build speed and slide through corners.</p><button class="start" id="start">START DRIVING</button><p class="hint">PC: A/D or ←/→ to steer · Space for handbrake<br>Phone: use the steering and handbrake buttons</p></div></div>
+<div class="overlay" id="crash" style="display:none"><div class="card"><h1>OFF THE ROAD</h1><p id="result">Distance: 0 km</p><button class="start" id="retry">DRIVE AGAIN</button></div></div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x91d0f1);scene.fog=new THREE.Fog(0x91d0f1,85,330);
+const camera=new THREE.PerspectiveCamera(65,innerWidth/innerHeight,.1,600);camera.position.set(0,5,11);
+const renderer=new THREE.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.15;document.body.appendChild(renderer.domElement);
+scene.add(new THREE.HemisphereLight(0xdaf2ff,0x65734a,2));
+const sun=new THREE.DirectionalLight(0xfff1d5,3.2);sun.position.set(-35,55,20);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);sun.shadow.camera.left=-60;sun.shadow.camera.right=60;sun.shadow.camera.top=60;sun.shadow.camera.bottom=-60;scene.add(sun);
+const mat=(color,rough=.8,metal=0)=>new THREE.MeshStandardMaterial({color,roughness:rough,metalness:metal});
+const grass=mat(0x4d8845),roadmat=mat(0x343a40,.96),lineMat=mat(0xf3eee0),rock=mat(0x788276),trunk=mat(0x60432c),leaf=mat(0x28633b);
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(1000,1000),grass);ground.rotation.x=-Math.PI/2;ground.position.y=-.12;ground.receiveShadow=true;scene.add(ground);
+// broad road ribbon with gentle bends
+const roadPts=[];for(let i=0;i<=100;i++){let z=80-i*4;roadPts.push(new THREE.Vector3(Math.sin(i*.075)*8,0,z))}
+const curve=new THREE.CatmullRomCurve3(roadPts);const roadGeo=new THREE.BufferGeometry();const verts=[],uv=[],idx=[];const samples=700;
+for(let i=0;i<=samples;i++){let t=i/samples,p=curve.getPoint(t),tan=curve.getTangent(t),side=new THREE.Vector3(-tan.z,0,tan.x).normalize();for(let s of [-1,1]){let v=p.clone().addScaledVector(side,s*7);verts.push(v.x,.015,v.z);uv.push(0,t*80)}if(i<samples){let a=i*2;idx.push(a,a+1,a+2,a+1,a+3,a+2)}}
+roadGeo.setAttribute('position',new THREE.Float32BufferAttribute(verts,3));roadGeo.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));roadGeo.setIndex(idx);roadGeo.computeVertexNormals();const road=new THREE.Mesh(roadGeo,roadmat);road.receiveShadow=true;scene.add(road);
+// road edge strips and dashed centre line
+function ribbon(offset,width,y,material){let g=new THREE.BufferGeometry(),v=[],ix=[];for(let i=0;i<=samples;i++){let t=i/samples,p=curve.getPoint(t),tan=curve.getTangent(t),side=new THREE.Vector3(-tan.z,0,tan.x).normalize(),c=p.addScaledVector(side,offset);v.push(c.x,y,c.z,c.x+side.x*width,y,c.z+side.z*width);if(i<samples){let a=i*2;ix.push(a,a+1,a+2,a+1,a+3,a+2)}}g.setAttribute('position',new THREE.Float32BufferAttribute(v,3));g.setIndex(ix);g.computeVertexNormals();let m=new THREE.Mesh(g,material);scene.add(m)}
+ribbon(-6.8,.22,.045,lineMat);ribbon(6.58,.22,.045,lineMat);
+for(let i=0;i<100;i+=2){let t=i/100,p=curve.getPoint(t),tan=curve.getTangent(t),side=new THREE.Vector3(-tan.z,0,tan.x).normalize();let dash=new THREE.Mesh(new THREE.BoxGeometry(.13,.035,2.1),lineMat);dash.position.copy(p).addScaledVector(side,0);dash.position.y=.05;dash.rotation.y=Math.atan2(tan.x,tan.z);scene.add(dash)}
+// distant layered mountain silhouettes
+for(let layer=0;layer<3;layer++){let m=new THREE.Mesh(new THREE.ConeGeometry(1,1,5),mat([0x78949a,0x647d72,0x506b55][layer]));for(let i=0;i<18;i++){let h=18+Math.random()*35,w=18+Math.random()*22,o=m.clone();o.scale.set(w,h,w);o.position.set((i-9)*37+(Math.random()*8),h/2-1,-145-layer*32-Math.random()*25);scene.add(o)}} 
+// trees and shrubs alongside road
+for(let i=0;i<170;i++){let t=(i%85)/85,p=curve.getPoint(t),tan=curve.getTangent(t),side=new THREE.Vector3(-tan.z,0,tan.x).normalize(),sgn=i<85?-1:1,d=12+Math.random()*25,pos=p.addScaledVector(side,sgn*d),h=2+Math.random()*3;
+let b=new THREE.Mesh(new THREE.CylinderGeometry(.16,.28,h*.65,7),trunk);b.position.set(pos.x,h*.32,pos.z);b.castShadow=true;scene.add(b);
+let crown=new THREE.Mesh(new THREE.ConeGeometry(1.3+Math.random(),h,7),leaf);crown.position.set(pos.x,h*.85,pos.z);crown.castShadow=true;scene.add(crown)}
+// car group, low-poly detailed sports coupe
+const car=new THREE.Group();scene.add(car);
+const blue=mat(0x087fae,.25,.62),dark=mat(0x111923,.4,.2),glass= new THREE.MeshStandardMaterial({color:0x173447,metalness:.45,roughness:.18}),rubber=mat(0x090c10),rim=mat(0xb9c5cb,.25,.85),lamp=new THREE.MeshStandardMaterial({color:0xeafaff,emissive:0x9bdfff,emissiveIntensity:1.2});
+function box(parent,w,h,d,material,x,y,z){let o=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),material);o.position.set(x,y,z);o.castShadow=true;o.receiveShadow=true;parent.add(o);return o}
+box(car,2.05,.48,4.25,blue,0,.72,0);box(car,1.8,.5,2.05,blue,0,1.12,-.25);let cabin=box(car,1.62,.68,1.8,glass,0,1.48,-.3);cabin.rotation.x=-.04;
+box(car,1.92,.12,1.1,blue,0,.92,1.55);box(car,1.8,.12,.22,dark,0,.54,-2.05);
+box(car,.55,.12,.18,lamp,-.66,.78,2.14);box(car,.55,.12,.18,lamp,.66,.78,2.14);
+box(car,.45,.13,.15,mat(0xff3030),-.67,.78,-2.14);box(car,.45,.13,.15,mat(0xff3030),.67,.78,-2.14);
+const wheels=[];for(let x of [-1.03,1.03])for(let z of [-1.35,1.38]){let pivot=new THREE.Group();pivot.position.set(x,.48,z);car.add(pivot);let tire=new THREE.Mesh(new THREE.CylinderGeometry(.43,.43,.28,24),rubber);tire.rotation.z=Math.PI/2;tire.castShadow=true;pivot.add(tire);let hub=new THREE.Mesh(new THREE.CylinderGeometry(.23,.23,.295,16),rim);hub.rotation.z=Math.PI/2;pivot.add(hub);wheels.push({pivot,tire})}
+car.position.set(0,0,0);
+// traffic cars as simple detailed vehicles moving toward player
+const traffic=[];function makeTraffic(z,lane){let g=new THREE.Group(),colors=[0xd64235,0xe5b52e,0xeeeeec,0x4c65ba,0x242a32],body=mat(colors[Math.floor(Math.random()*colors.length)],.3,.35);box(g,1.8,.5,3.6,body,0,.68,0);box(g,1.45,.55,1.7,glass,0,1.15,-.2);for(let x of [-.92,.92])for(let zz of [-1.1,1.1]){let w=new THREE.Mesh(new THREE.CylinderGeometry(.34,.34,.22,16),rubber);w.rotation.z=Math.PI/2;w.position.set(x,.4,zz);g.add(w)}g.position.set(lane,0,z);scene.add(g);traffic.push({g,z,lane})}
+let running=false,speed=0,dist=0,steer=0,drifting=false,keys={l:false,r:false},last=performance.now(),spawn=0,carX=0,velocity=0;
+function reset(){traffic.forEach(v=>scene.remove(v.g));traffic.length=0;speed=75;dist=0;carX=0;velocity=0;spawn=1;running=true;document.getElementById('intro').style.display='none';document.getElementById('crash').style.display='none';last=performance.now()}
+function end(){running=false;document.getElementById('result').textContent='You covered '+(dist/1000).toFixed(2)+' km.';document.getElementById('crash').style.display='flex'}
+function animate(now){requestAnimationFrame(animate);let dt=Math.min((now-last)/1000,.04);last=now;if(running){let input=(keys.r?1:0)-(keys.l?1:0);velocity+=(input*22-velocity*3.5)*dt;carX+=velocity*dt*.28;carX=THREE.MathUtils.clamp(carX,-5.4,5.4);speed=THREE.MathUtils.clamp(speed+(drifting?-12:2.2)*dt,35,245);dist+=speed/3.6*dt;car.position.x=carX;car.rotation.z=THREE.MathUtils.lerp(car.rotation.z,-velocity*.012-(drifting?input*.12:0),.12);car.rotation.y=THREE.MathUtils.lerp(car.rotation.y,-velocity*.012,.08);wheels.forEach(w=>{w.tire.rotation.x-=speed*dt*.018;w.pivot.rotation.y=velocity*.025});
+let p=curve.getPointAt((dist/9500)%1),tan=curve.getTangentAt((dist/9500)%1);car.position.z=p.z+4;car.position.x+=p.x*.035;
+camera.position.lerp(new THREE.Vector3(car.position.x*.45,4.4,car.position.z+10.5),.08);camera.lookAt(car.position.x*.25,1,car.position.z-15);
+spawn-=dt;if(spawn<=0){makeTraffic(car.position.z-100-Math.random()*45,[-4,0,4][Math.floor(Math.random()*3)]);spawn=1.5+Math.random()*1.2}
+traffic.forEach(v=>{v.z+=speed/3.6*dt*.8;v.g.position.z=v.z});for(let v of traffic){if(Math.abs(v.z-car.position.z)<3.1&&Math.abs(v.lane-car.position.x)<2.0)end()}for(let i=traffic.length-1;i>=0;i--)if(traffic[i].z>car.position.z+15){scene.remove(traffic[i].g);traffic.splice(i,1)}
+document.getElementById('speed').textContent=Math.round(speed)+' km/h';document.getElementById('distance').textContent=(dist/1000).toFixed(1)+' km';document.getElementById('status').textContent=drifting?'HANDBRAKE • DRIFTING':'SUNNY • OPEN HIGHWAY'}
+renderer.render(scene,camera)}
+requestAnimationFrame(animate);
+document.getElementById('start').onclick=reset;document.getElementById('retry').onclick=reset;
+function hold(id,key){let el=document.getElementById(id);el.onpointerdown=e=>{e.preventDefault();keys[key]=true};['pointerup','pointerleave','pointercancel'].forEach(ev=>el.addEventListener(ev,()=>keys[key]=false))}
+hold('left','l');hold('right','r');let db=document.getElementById('drift');db.onpointerdown=e=>{e.preventDefault();drifting=true};['pointerup','pointerleave','pointercancel'].forEach(ev=>db.addEventListener(ev,()=>drifting=false));
+onkeydown=e=>{if(['ArrowLeft','a','A'].includes(e.key))keys.l=true;if(['ArrowRight','d','D'].includes(e.key))keys.r=true;if(e.code==='Space')drifting=true};onkeyup=e=>{if(['ArrowLeft','a','A'].includes(e.key))keys.l=false;if(['ArrowRight','d','D'].includes(e.key))keys.r=false;if(e.code==='Space')drifting=false};
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+</script></body></html>
